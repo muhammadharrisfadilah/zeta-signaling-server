@@ -1,99 +1,105 @@
+const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
-const fs = require('fs');
 const path = require('path');
 
-const WS_PORT = 8080;
-const HTTP_PORT = 8000;
-const PING_INTERVAL = 15000; // 15 seconds
-const CONNECTION_TIMEOUT = 60000; // 60 seconds
+// ✅ Environment variables untuk Glitch
+const PORT = process.env.PORT || 3000;
+
+// Express app
+const app = express();
+
+// Serve static files (viewer.html)
+app.use(express.static('public'));
+
+// Health check untuk Glitch
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        uptime: process.uptime(),
+        connections: {
+            android: androidClients.size,
+            browsers: browserClients.size
+        }
+    });
+});
+
+// Create HTTP server
+const server = http.createServer(app);
 
 // WebSocket Server
-const wss = new WebSocket.Server({ port: WS_PORT });
+const wss = new WebSocket.Server({ 
+    server,
+    // ✅ Path untuk WebSocket
+    path: '/ws'
+});
 
-let androidClient = null;
-let browserClients = new Map(); // Menggunakan Map untuk tracking lebih baik
+// Client tracking
+let androidClients = new Map(); // Map<clientId, {ws, lastSeen}>
+let browserClients = new Map(); // Map<clientId, {ws, browserId}>
 
-// ✅ FIXED: Keepalive tracking dengan timestamp
-const pingIntervals = new Map();
-const connectionTimestamps = new Map();
+const PING_INTERVAL = 30000; // 30 seconds
+const CLIENT_TIMEOUT = 90000; // 90 seconds
 
-console.log('🚀 Zeta Signaling Server v2.1');
+console.log('🚀 Zeta Signaling Server (Glitch Edition)');
 console.log('━'.repeat(50));
-console.log(`📡 WebSocket: ws://0.0.0.0:${WS_PORT}`);
-console.log(`🌐 HTTP: http://0.0.0.0:${HTTP_PORT}`);
-console.log(`⏰ Timeout: ${CONNECTION_TIMEOUT/1000}s, Ping: ${PING_INTERVAL/1000}s`);
-console.log('━'.repeat(50));
 
-// ✅ FIXED: Enhanced ping function
-function startPingInterval(ws, clientType) {
-    // Hapus interval sebelumnya jika ada
-    stopPingInterval(ws);
+// Ping interval untuk keep-alive
+setInterval(() => {
+    const now = Date.now();
     
-    const interval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            try {
-                ws.ping();
-                console.log(`💓 Ping to ${clientType} from ${ws._socket?.remoteAddress || 'unknown'}`);
-            } catch (error) {
-                console.error(`❌ Ping failed for ${clientType}:`, error.message);
-                clearInterval(interval);
-                pingIntervals.delete(ws);
-            }
+    // Ping Android clients
+    androidClients.forEach((client, id) => {
+        if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.ping();
+            console.log(`💓 Ping to Android: ${id}`);
         } else {
-            clearInterval(interval);
-            pingIntervals.delete(ws);
+            cleanupAndroidClient(id);
         }
-    }, PING_INTERVAL);
+    });
     
-    pingIntervals.set(ws, interval);
-    connectionTimestamps.set(ws, Date.now());
-}
-
-function stopPingInterval(ws) {
-    if (pingIntervals.has(ws)) {
-        clearInterval(pingIntervals.get(ws));
-        pingIntervals.delete(ws);
-    }
-    connectionTimestamps.delete(ws);
-}
-
-// ✅ FIXED: Connection timeout handler
-function setupConnectionTimeout(ws, clientType) {
-    const timeout = setTimeout(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            console.log(`⏰ ${clientType} connection timeout, closing`);
-            ws.close(1001, 'Connection timeout');
+    // Ping Browser clients
+    browserClients.forEach((client, id) => {
+        if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.ping();
+            console.log(`💓 Ping to Browser: ${id}`);
+        } else {
+            cleanupBrowserClient(id);
         }
-    }, CONNECTION_TIMEOUT);
+    });
+}, PING_INTERVAL);
+
+// Cleanup stale connections
+setInterval(() => {
+    const now = Date.now();
     
-    ws._timeout = timeout;
-}
+    androidClients.forEach((client, id) => {
+        if (now - client.lastSeen > CLIENT_TIMEOUT) {
+            console.log(`⏰ Android timeout: ${id}`);
+            cleanupAndroidClient(id);
+        }
+    });
+}, 60000); // Check every minute
 
 wss.on('connection', (ws, req) => {
     const ip = req.socket.remoteAddress;
     const clientId = `${ip}-${Date.now()}`;
     
-    console.log(`\n📱 New connection from ${ip} (ID: ${clientId})`);
+    console.log(`\n📱 New connection: ${clientId}`);
     
-    // ✅ FIXED: Setup connection timeout
-    setupConnectionTimeout(ws, 'New Client');
+    // Track last activity
+    let lastPong = Date.now();
     
-    // ✅ FIXED: Handle pong responses
     ws.on('pong', () => {
-        connectionTimestamps.set(ws, Date.now());
+        lastPong = Date.now();
     });
-
+    
     ws.on('message', (data) => {
         try {
-            // Update last activity timestamp
-            connectionTimestamps.set(ws, Date.now());
-            
-            const messageStr = data.toString();
-            const message = JSON.parse(messageStr);
+            const message = JSON.parse(data.toString());
             const type = message.type;
-
-            // ✅ FIXED: Handle ping/pong from clients
+            
+            // Handle ping/pong
             if (type === 'ping') {
                 ws.send(JSON.stringify({ 
                     type: 'pong', 
@@ -104,162 +110,151 @@ wss.on('connection', (ws, req) => {
             }
             
             if (type === 'pong') {
+                lastPong = Date.now();
                 return;
             }
-
+            
             // Client identification
             if (type === 'client-type') {
                 if (message.client === 'android') {
-                    // Close previous Android connection if exists
-                    if (androidClient && androidClient !== ws) {
-                        console.log(`🔄 Replacing previous Android connection`);
-                        stopPingInterval(androidClient);
-                        if (androidClient._timeout) clearTimeout(androidClient._timeout);
-                        androidClient.close(1000, 'Replaced by new connection');
-                    }
+                    // Register Android client
+                    androidClients.set(clientId, {
+                        ws: ws,
+                        lastSeen: Date.now(),
+                        ip: ip
+                    });
                     
-                    androidClient = ws;
-                    ws._clientType = 'android';
-                    ws._clientId = clientId;
-                    console.log('✅ Android client registered:', clientId);
-                    
-                    // Start keepalive for Android
-                    startPingInterval(ws, 'Android');
+                    console.log(`✅ Android registered: ${clientId}`);
+                    console.log(`   Total Android clients: ${androidClients.size}`);
                     
                     // Notify all browsers
                     broadcastToBrowsers({
                         type: 'android-connected',
-                        timestamp: Date.now(),
-                        id: clientId,
-                        ip: ip
+                        androidId: clientId,
+                        timestamp: Date.now()
                     });
                     
-                    // Log connection state
-                    logConnectionState();
+                    // Send welcome message
+                    ws.send(JSON.stringify({
+                        type: 'welcome',
+                        clientId: clientId,
+                        message: 'Connected to Zeta Cloud Server'
+                    }));
                     
                 } else if (message.client === 'browser') {
-                    browserClients.set(ws, {
-                        id: clientId,
-                        ip: ip,
-                        connectedAt: Date.now()
+                    // Register Browser client
+                    const browserId = message.browserId || clientId;
+                    
+                    browserClients.set(clientId, {
+                        ws: ws,
+                        browserId: browserId,
+                        lastSeen: Date.now()
                     });
-                    ws._clientType = 'browser';
-                    ws._clientId = clientId;
                     
-                    console.log(`✅ Browser client registered (${browserClients.size} total):`, clientId);
+                    console.log(`✅ Browser registered: ${clientId}`);
+                    console.log(`   Browser ID: ${browserId}`);
+                    console.log(`   Total browsers: ${browserClients.size}`);
                     
-                    // Start keepalive for browser
-                    startPingInterval(ws, 'Browser');
-                    
-                    // Request offer from Android if available
-                    if (androidClient && androidClient.readyState === WebSocket.OPEN) {
-                        androidClient.send(JSON.stringify({
-                            type: 'request-offer',
-                            timestamp: Date.now(),
-                            browserId: clientId
-                        }));
-                        console.log('📤 Requested offer from Android for browser:', clientId);
-                    } else {
-                        // Notify browser that Android is not available
+                    // Notify about existing Android clients
+                    if (androidClients.size > 0) {
                         ws.send(JSON.stringify({
-                            type: 'android-status',
-                            status: 'disconnected',
+                            type: 'android-available',
+                            count: androidClients.size,
                             timestamp: Date.now()
                         }));
+                        
+                        // Request offer from first Android
+                        const firstAndroid = androidClients.values().next().value;
+                        if (firstAndroid && firstAndroid.ws.readyState === WebSocket.OPEN) {
+                            firstAndroid.ws.send(JSON.stringify({
+                                type: 'request-offer',
+                                browserId: browserId,
+                                timestamp: Date.now()
+                            }));
+                            console.log(`📤 Requested offer from Android for browser: ${browserId}`);
+                        }
                     }
                 }
                 return;
             }
-
-            // ✅ FIXED: Handle camera status from Android
-            if (type === 'camera-status') {
-                console.log(`📸 Camera ${message.status}: ${message.camera || 'N/A'}`);
-                broadcastToBrowsers(message);
-                return;
-            }
             
-            if (type === 'camera-error') {
-                console.error(`❌ Camera error: ${message.message}`);
-                broadcastToBrowsers(message);
-                return;
-            }
-
-            // Relay signaling messages
-            if (ws === androidClient) {
-                // Android → Browsers
+            // Route messages between Android and Browsers
+            if (androidClients.has(clientId)) {
+                // Message from Android → Broadcast to all browsers
                 console.log(`📤 Android → Browsers: ${type}`);
+                androidClients.get(clientId).lastSeen = Date.now();
+                
+                // Add sender info
+                message.androidId = clientId;
+                
                 broadcastToBrowsers(message);
-            } else if (browserClients.has(ws)) {
-                // Browser → Android
+                
+            } else if (browserClients.has(clientId)) {
+                // Message from Browser → Send to target Android or broadcast
+                const browser = browserClients.get(clientId);
+                browser.lastSeen = Date.now();
+                
                 console.log(`📤 Browser → Android: ${type}`);
-                if (androidClient && androidClient.readyState === WebSocket.OPEN) {
-                    androidClient.send(JSON.stringify(message));
+                
+                // Add browser ID to message
+                message.browserId = browser.browserId;
+                
+                // Send to specific Android if specified, otherwise first available
+                if (message.androidId && androidClients.has(message.androidId)) {
+                    const android = androidClients.get(message.androidId);
+                    if (android.ws.readyState === WebSocket.OPEN) {
+                        android.ws.send(JSON.stringify(message));
+                    }
                 } else {
-                    // If Android is not connected, notify browser
-                    ws.send(JSON.stringify({
-                        type: 'error',
-                        message: 'Android client not connected',
-                        timestamp: Date.now()
-                    }));
+                    // Send to first available Android
+                    const firstAndroid = androidClients.values().next().value;
+                    if (firstAndroid && firstAndroid.ws.readyState === WebSocket.OPEN) {
+                        firstAndroid.ws.send(JSON.stringify(message));
+                    } else {
+                        console.log('⚠️ No Android available');
+                        ws.send(JSON.stringify({
+                            type: 'error',
+                            message: 'No Android device connected'
+                        }));
+                    }
                 }
             }
-
+            
         } catch (error) {
             console.error('❌ Parse error:', error.message);
-            ws.send(JSON.stringify({
-                type: 'error',
-                message: 'Invalid message format',
-                timestamp: Date.now()
-            }));
         }
     });
-
+    
     ws.on('close', (code, reason) => {
-        console.log(`🔌 Client disconnected: ${code} - ${reason || 'No reason'}`);
+        console.log(`🔌 Client disconnected: ${code} - ${reason}`);
         
-        // Clear timeout and intervals
-        stopPingInterval(ws);
-        if (ws._timeout) clearTimeout(ws._timeout);
-        
-        if (ws === androidClient) {
-            androidClient = null;
-            console.log('❌ Android disconnected');
-            
-            broadcastToBrowsers({
-                type: 'android-disconnected',
-                timestamp: Date.now(),
-                reason: reason || 'Unknown'
-            });
+        if (androidClients.has(clientId)) {
+            cleanupAndroidClient(clientId);
         }
         
-        if (browserClients.has(ws)) {
-            browserClients.delete(ws);
-            console.log(`❌ Browser disconnected (${browserClients.size} remaining)`);
+        if (browserClients.has(clientId)) {
+            cleanupBrowserClient(clientId);
         }
         
         logConnectionState();
     });
-
+    
     ws.on('error', (error) => {
-        console.error('❌ WebSocket error:', error.message);
-        stopPingInterval(ws);
-        if (ws._timeout) clearTimeout(ws._timeout);
+        console.error(`❌ WebSocket error (${clientId}):`, error.message);
     });
 });
 
 function broadcastToBrowsers(message) {
     const data = JSON.stringify(message);
     let successCount = 0;
-    let errorCount = 0;
     
-    browserClients.forEach((info, client) => {
-        if (client.readyState === WebSocket.OPEN) {
+    browserClients.forEach((client, id) => {
+        if (client.ws.readyState === WebSocket.OPEN) {
             try {
-                client.send(data);
+                client.ws.send(data);
                 successCount++;
             } catch (error) {
-                console.error(`❌ Broadcast failed to ${info.id}:`, error.message);
-                errorCount++;
+                console.error(`❌ Broadcast failed to ${id}:`, error.message);
             }
         }
     });
@@ -267,133 +262,69 @@ function broadcastToBrowsers(message) {
     if (successCount > 0) {
         console.log(`✅ Broadcast to ${successCount} browser(s)`);
     }
-    if (errorCount > 0) {
-        console.warn(`⚠️ Failed to broadcast to ${errorCount} browser(s)`);
-    }
+}
+
+function cleanupAndroidClient(clientId) {
+    androidClients.delete(clientId);
+    console.log(`❌ Android disconnected: ${clientId}`);
+    console.log(`   Remaining Android clients: ${androidClients.size}`);
+    
+    // Notify all browsers
+    broadcastToBrowsers({
+        type: 'android-disconnected',
+        androidId: clientId,
+        timestamp: Date.now()
+    });
+}
+
+function cleanupBrowserClient(clientId) {
+    browserClients.delete(clientId);
+    console.log(`❌ Browser disconnected: ${clientId}`);
+    console.log(`   Remaining browsers: ${browserClients.size}`);
 }
 
 function logConnectionState() {
-    console.log('━━━━━━━━ CONNECTION STATE ━━━━━━━━');
-    console.log(`Android: ${androidClient ? 'CONNECTED' : 'DISCONNECTED'}`);
+    console.log('\n━━━━━━━━ CONNECTION STATE ━━━━━━━━');
+    console.log(`Android: ${androidClients.size} connected`);
+    androidClients.forEach((client, id) => {
+        console.log(`  - ${id} (${client.ip}): ${client.ws.readyState === WebSocket.OPEN ? 'OPEN' : 'CLOSED'}`);
+    });
     console.log(`Browsers: ${browserClients.size} connected`);
-    
-    browserClients.forEach((info, client) => {
-        const state = client.readyState === WebSocket.OPEN ? 'OPEN' : 
-                     client.readyState === WebSocket.CLOSED ? 'CLOSED' : 
-                     client.readyState === WebSocket.CLOSING ? 'CLOSING' : 'CONNECTING';
-        console.log(`  - ${info.id} (${info.ip}): ${state}`);
+    browserClients.forEach((client, id) => {
+        console.log(`  - ${client.browserId} (${id}): ${client.ws.readyState === WebSocket.OPEN ? 'OPEN' : 'CLOSED'}`);
     });
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 }
 
-// HTTP Server for viewer page
-const server = http.createServer((req, res) => {
-    // Add CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    
-    if (req.method === 'OPTIONS') {
-        res.writeHead(200);
-        res.end();
-        return;
-    }
-    
-    if (req.url === '/' || req.url === '/index.html') {
-        const filePath = path.join(__dirname, 'viewer.html');
-        
-        fs.readFile(filePath, (err, data) => {
-            if (err) {
-                res.writeHead(404);
-                res.end('File not found');
-                return;
-            }
-            
-            res.writeHead(200, { 
-                'Content-Type': 'text/html',
-                'Cache-Control': 'no-cache'
-            });
-            res.end(data);
-        });
-    } else {
-        res.writeHead(404);
-        res.end('Not found');
-    }
-});
-
-server.listen(HTTP_PORT, '0.0.0.0', () => {
-    console.log(`\n💡 Open browser: http://localhost:${HTTP_PORT}`);
-    console.log(`📱 Android should connect to: ws://YOUR_IP:${WS_PORT}`);
+// Start server
+server.listen(PORT, () => {
+    console.log(`\n💡 Server running on port ${PORT}`);
+    console.log(`🌐 WebSocket endpoint: wss://your-app.glitch.me/ws`);
+    console.log(`🎥 Viewer page: https://your-app.glitch.me`);
     console.log('⏳ Waiting for connections...\n');
 });
 
-// ✅ FIXED: Enhanced cleanup of dead connections
-setInterval(() => {
-    const now = Date.now();
-    let cleaned = 0;
-    
-    // Clean up dead browser connections
-    browserClients.forEach((info, client) => {
-        if (client.readyState !== WebSocket.OPEN) {
-            stopPingInterval(client);
-            if (client._timeout) clearTimeout(client._timeout);
-            browserClients.delete(client);
-            cleaned++;
-        } else {
-            // Check last activity
-            const lastActivity = connectionTimestamps.get(client);
-            if (lastActivity && (now - lastActivity) > CONNECTION_TIMEOUT) {
-                console.log(`⏰ Browser ${info.id} inactive, closing`);
-                client.close(1001, 'Inactive timeout');
-                cleaned++;
-            }
-        }
-    });
-    
-    // Check Android connection
-    if (androidClient && androidClient.readyState !== WebSocket.OPEN) {
-        stopPingInterval(androidClient);
-        if (androidClient._timeout) clearTimeout(androidClient._timeout);
-        androidClient = null;
-        console.log('⚠️ Android connection was dead, cleaned up');
-        cleaned++;
-    } else if (androidClient) {
-        // Check Android activity
-        const lastActivity = connectionTimestamps.get(androidClient);
-        if (lastActivity && (now - lastActivity) > CONNECTION_TIMEOUT) {
-            console.log(`⏰ Android inactive, closing`);
-            androidClient.close(1001, 'Inactive timeout');
-            cleaned++;
-        }
-    }
-    
-    if (cleaned > 0) {
-        console.log(`🧹 Cleaned up ${cleaned} dead connections`);
-    }
-}, 30000); // Every 30 seconds
-
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGTERM', () => {
     console.log('\n🛑 Shutting down gracefully...');
     
-    // Clear all intervals and timeouts
-    pingIntervals.forEach((interval) => {
-        clearInterval(interval);
-    });
-    pingIntervals.clear();
-    
-    connectionTimestamps.clear();
-    
     // Close all connections
-    if (androidClient) androidClient.close(1000, 'Server shutdown');
-    browserClients.forEach((info, client) => {
-        client.close(1000, 'Server shutdown');
+    androidClients.forEach((client) => {
+        if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.close(1000, 'Server shutting down');
+        }
     });
     
-    setTimeout(() => {
-        wss.close();
-        server.close();
-        console.log('✅ Server shutdown complete');
-        process.exit(0);
-    }, 1000);
+    browserClients.forEach((client) => {
+        if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.close(1000, 'Server shutting down');
+        }
+    });
+    
+    wss.close(() => {
+        server.close(() => {
+            console.log('✅ Server closed');
+            process.exit(0);
+        });
+    });
 });
