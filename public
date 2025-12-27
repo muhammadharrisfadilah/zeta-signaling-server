@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zeta Stream Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            animation: fadeInDown 0.6s ease;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            font-weight: 700;
+            background: linear-gradient(90deg, #4CAF50, #2196F3);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 30px;
+            animation: fadeIn 0.8s ease;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 24px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 50px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.3s ease;
+        }
+
+        .status-badge.connected {
+            border-color: #4CAF50;
+            box-shadow: 0 0 20px rgba(76, 175, 80, 0.3);
+        }
+
+        .status-badge.streaming {
+            border-color: #2196F3;
+            box-shadow: 0 0 20px rgba(33, 150, 243, 0.3);
+        }
+
+        .status-badge.error {
+            border-color: #f44336;
+            box-shadow: 0 0 20px rgba(244, 67, 54, 0.3);
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #888;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .status-dot.active {
+            background: #4CAF50;
+        }
+
+        .status-dot.warning {
+            background: #FFC107;
+        }
+
+        .status-dot.error {
+            background: #f44336;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto 30px;
+            border-radius: 20px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            animation: scaleIn 0.6s ease;
+        }
+
+        .video-wrapper {
+            position: relative;
+            padding-bottom: 56.25%;
+        }
+
+        #remoteVideo {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            transition: opacity 0.3s ease;
+            z-index: 10;
+        }
+
+        .video-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .video-overlay-content {
+            text-align: center;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto 30px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(76, 175, 80, 0.5);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .stat-label {
+            font-size: 0.85em;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: 700;
+            color: #4CAF50;
+        }
+
+        .logs-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            overflow: hidden;
+        }
+
+        .logs-header {
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logs-header h3 {
+            font-size: 1.1em;
+            font-weight: 600;
+        }
+
+        .clear-logs-btn {
+            padding: 6px 16px;
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid rgba(244, 67, 54, 0.5);
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+        }
+
+        .clear-logs-btn:hover {
+            background: rgba(244, 67, 54, 0.3);
+            transform: scale(1.05);
+        }
+
+        .logs-content {
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            line-height: 1.6;
+        }
+
+        .logs-content::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .logs-content::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .logs-content::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        .log-entry {
+            padding: 6px 0;
+            opacity: 0;
+            animation: fadeInLeft 0.3s ease forwards;
+        }
+
+        .log-time {
+            color: rgba(255, 255, 255, 0.4);
+            margin-right: 10px;
+        }
+
+        .log-info { color: #4CAF50; }
+        .log-warn { color: #FFC107; }
+        .log-error { color: #f44336; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInLeft {
+            from {
+                opacity: 0;
+                transform: translateX(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes scaleIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .status-bar {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📹 Zeta Stream Viewer</h1>
+            <p>Professional WebRTC Live Streaming</p>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-badge" id="wsStatus">
+                <div class="status-dot" id="wsDot"></div>
+                <span id="wsText">Connecting...</span>
+            </div>
+            <div class="status-badge" id="androidStatus">
+                <div class="status-dot" id="androidDot"></div>
+                <span id="androidText">Waiting for Android</span>
+            </div>
+            <div class="status-badge" id="streamStatus">
+                <div class="status-dot" id="streamDot"></div>
+                <span id="streamText">No Stream</span>
+            </div>
+        </div>
+
+        <div class="video-container">
+            <div class="video-wrapper">
+                <video id="remoteVideo" autoplay playsinline muted controls></video>
+                <div class="video-overlay" id="videoOverlay">
+                    <div class="video-overlay-content">
+                        <div class="spinner"></div>
+                        <p id="overlayText">Waiting for stream...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Connection State</div>
+                <div class="stat-value" id="statConnection">Disconnected</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">ICE State</div>
+                <div class="stat-value" id="statIce">New</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Video Resolution</div>
+                <div class="stat-value" id="statResolution">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Bitrate</div>
+                <div class="stat-value" id="statBitrate">- kbps</div>
+            </div>
+        </div>
+
+        <div class="logs-container">
+            <div class="logs-header">
+                <h3>📋 Event Logs</h3>
+                <button class="clear-logs-btn" onclick="clearLogs()">Clear Logs</button>
+            </div>
+            <div class="logs-content" id="logsContent">
+                <div class="log-entry log-info">
+                    <span class="log-time">[--:--:--]</span>
+                    <span>System initialized</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const WS_URL = 'ws://localhost:8080';
+        
+        let ws, pc;
+        const video = document.getElementById('remoteVideo');
+        const videoOverlay = document.getElementById('videoOverlay');
+        const overlayText = document.getElementById('overlayText');
+        
+        let statsInterval;
+        // ✅ FIXED: Track bytes for proper bitrate calculation
+        let lastBytesReceived = 0;
+        let lastTimestamp = Date.now();
+
+        function log(message, type = 'info') {
+            console.log(`[${type.toUpperCase()}]`, message);
+            
+            const logsContent = document.getElementById('logsContent');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="log-time">[${time}]</span><span>${message}</span>`;
+            
+            logsContent.appendChild(entry);
+            logsContent.scrollTop = logsContent.scrollHeight;
+        }
+
+        function clearLogs() {
+            document.getElementById('logsContent').innerHTML = '';
+            log('Logs cleared', 'info');
+        }
+
+        function updateStatus(element, dot, text, state) {
+            const badge = document.getElementById(element);
+            const dotEl = document.getElementById(dot);
+            const textEl = document.getElementById(text);
+
+            badge.className = 'status-badge';
+            dotEl.className = 'status-dot';
+
+            switch(state) {
+                case 'connected':
+                    badge.classList.add('connected');
+                    dotEl.classList.add('active');
+                    break;
+                case 'streaming':
+                    badge.classList.add('streaming');
+                    dotEl.classList.add('active');
+                    break;
+                case 'error':
+                    badge.classList.add('error');
+                    dotEl.classList.add('error');
+                    break;
+                case 'warning':
+                    dotEl.classList.add('warning');
+                    break;
+            }
+        }
+
+        function connectWebSocket() {
+            log('🔌 Connecting to signaling server...', 'info');
+            document.getElementById('wsText').textContent = 'Connecting...';
+
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                log('✅ Connected to signaling server', 'info');
+                document.getElementById('wsText').textContent = 'Connected';
+                updateStatus('wsStatus', 'wsDot', 'wsText', 'connected');
+
+                ws.send(JSON.stringify({
+                    type: 'client-type',
+                    client: 'browser'
+                }));
+
+                initPeerConnection();
+            };
+
+            ws.onmessage = async (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    await handleSignaling(message);
+                } catch (error) {
+                    log(`❌ Parse error: ${error.message}`, 'error');
+                }
+            };
+
+            ws.onclose = () => {
+                log('🔌 Disconnected from server', 'warn');
+                document.getElementById('wsText').textContent = 'Disconnected';
+                updateStatus('wsStatus', 'wsDot', 'wsText', 'error');
+                
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = (error) => {
+                log(`❌ WebSocket error`, 'error');
+            };
+        }
+
+        function initPeerConnection() {
+            const config = {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' }
+                ]
+            };
+
+            pc = new RTCPeerConnection(config);
+
+            pc.ontrack = (event) => {
+                log('🎥 Received media track: ' + event.track.kind, 'info');
+                
+                if (event.track.kind === 'video') {
+                    // ✅ Set video srcObject
+                    if (video.srcObject !== event.streams[0]) {
+                        video.srcObject = event.streams[0];
+                        log('✅ Video stream attached', 'info');
+                        
+                        // ✅ FIXED: Force unmute and play immediately
+                        video.muted = true; // Critical for autoplay
+                        video.volume = 0;
+                        
+                        // Try to play immediately
+                        attemptPlay();
+                    }
+                }
+            };
+            
+            // ✅ ADDED: Robust play function with retry
+            function attemptPlay() {
+                log('⏯️ Attempting to play video...', 'info');
+                debugVideoState();
+                
+                // Wait a bit for stream to be fully ready
+                setTimeout(() => {
+                    video.play().then(() => {
+                        log('▶️ Video playback started!', 'info');
+                        videoOverlay.classList.add('hidden');
+                        document.getElementById('streamText').textContent = 'Streaming';
+                        updateStatus('streamStatus', 'streamDot', 'streamText', 'streaming');
+                        startStatsMonitor();
+                        
+                        // Verify video is actually playing
+                        setTimeout(() => {
+                            if (video.paused) {
+                                log('⚠️ Video is paused after play()!', 'warn');
+                                debugVideoState();
+                            } else {
+                                log('✅ Video confirmed playing', 'info');
+                            }
+                        }, 1000);
+                    }).catch(error => {
+                        log('❌ Autoplay failed: ' + error.message, 'error');
+                        debugVideoState();
+                        
+                        // Show click-to-play button
+                        overlayText.innerHTML = `
+                            <button onclick="forcePlay()" 
+                                    style="padding: 15px 30px; 
+                                           background: #4CAF50; 
+                                           border: none; 
+                                           border-radius: 8px; 
+                                           color: white; 
+                                           font-size: 16px; 
+                                           cursor: pointer;
+                                           margin-top: 20px;">
+                                ▶️ Click to Play
+                            </button>
+                            <p style="margin-top: 10px; font-size: 14px; color: #888;">
+                                Browser blocked autoplay. Click button above.
+                            </p>
+                        `;
+                        document.querySelector('.spinner').style.display = 'none';
+                    });
+                }, 300); // Small delay to ensure stream is ready
+            }
+            
+            // ✅ ADDED: Force play on user interaction
+            window.forcePlay = function() {
+                log('👆 User clicked play', 'info');
+                video.muted = true;
+                video.play().then(() => {
+                    log('▶️ Video playing after user interaction', 'info');
+                    videoOverlay.classList.add('hidden');
+                    document.getElementById('streamText').textContent = 'Streaming';
+                    updateStatus('streamStatus', 'streamDot', 'streamText', 'streaming');
+                    startStatsMonitor();
+                }).catch(e => {
+                    log('❌ Play failed even after user click: ' + e.message, 'error');
+                    alert('Video play failed. Please check browser permissions.');
+                });
+            };
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({
+                        type: 'ice-candidate',
+                        sdpMid: event.candidate.sdpMid,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex,
+                        candidate: event.candidate.candidate
+                    }));
+                    log('➕ Sent ICE candidate', 'info');
+                }
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                const state = pc.iceConnectionState;
+                log(`❄️ ICE State: ${state}`, 'info');
+                document.getElementById('statIce').textContent = state;
+
+                if (state === 'connected') {
+                    log('✅ P2P Connection established!', 'info');
+                } else if (state === 'disconnected') {
+                    log('⚠️ Connection lost', 'warn');
+                    videoOverlay.classList.remove('hidden');
+                    overlayText.textContent = 'Connection lost...';
+                } else if (state === 'failed') {
+                    log('❌ Connection failed', 'error');
+                    videoOverlay.classList.remove('hidden');
+                    overlayText.textContent = 'Connection failed';
+                }
+            };
+
+            pc.onconnectionstatechange = () => {
+                const state = pc.connectionState;
+                document.getElementById('statConnection').textContent = state;
+                log(`📡 Connection State: ${state}`, 'info');
+            };
+
+            log('✅ PeerConnection initialized', 'info');
+        }
+
+        async function handleSignaling(message) {
+            const { type } = message;
+
+            switch (type) {
+                case 'android-connected':
+                    log('📱 Android device connected', 'info');
+                    document.getElementById('androidText').textContent = 'Android Connected';
+                    updateStatus('androidStatus', 'androidDot', 'androidText', 'connected');
+                    overlayText.textContent = 'Waiting for stream...';
+                    break;
+
+                case 'android-disconnected':
+                    log('📱 Android device disconnected', 'warn');
+                    document.getElementById('androidText').textContent = 'Android Offline';
+                    updateStatus('androidStatus', 'androidDot', 'androidText', 'error');
+                    document.getElementById('streamText').textContent = 'No Stream';
+                    videoOverlay.classList.remove('hidden');
+                    overlayText.textContent = 'Android disconnected';
+                    stopStatsMonitor();
+                    break;
+
+                case 'offer':
+                    log('📨 Received SDP Offer', 'info');
+                    overlayText.textContent = 'Processing offer...';
+
+                    await pc.setRemoteDescription({
+                        type: 'offer',
+                        sdp: message.sdp
+                    });
+
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+
+                    ws.send(JSON.stringify({
+                        type: 'answer',
+                        sdp: answer.sdp
+                    }));
+
+                    log('📤 Sent SDP Answer', 'info');
+                    break;
+
+                case 'ice-candidate':
+                    log('➕ Received ICE candidate', 'info');
+
+                    await pc.addIceCandidate({
+                        sdpMid: message.sdpMid,
+                        sdpMLineIndex: message.sdpMLineIndex,
+                        candidate: message.candidate
+                    });
+                    break;
+                    
+                // ✅ ADDED: Handle ping
+                case 'ping':
+                    ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+                    break;
+            }
+        }
+
+        function startStatsMonitor() {
+            // Reset tracking variables
+            lastBytesReceived = 0;
+            lastTimestamp = Date.now();
+            
+            statsInterval = setInterval(async () => {
+                if (!pc) return;
+
+                const stats = await pc.getStats();
+                let currentBytesReceived = 0;
+                let width = 0;
+                let height = 0;
+
+                stats.forEach(report => {
+                    if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                        currentBytesReceived = report.bytesReceived || 0;
+                        width = report.frameWidth;
+                        height = report.frameHeight;
+                    }
+                });
+
+                // ✅ FIXED: Calculate bitrate properly (bytes per second)
+                const now = Date.now();
+                const timeDiff = (now - lastTimestamp) / 1000; // seconds
+                
+                if (lastBytesReceived > 0 && timeDiff > 0) {
+                    const bytesDiff = currentBytesReceived - lastBytesReceived;
+                    const bitrate = Math.round((bytesDiff * 8) / timeDiff / 1000); // kbps
+                    
+                    if (bitrate > 0) {
+                        document.getElementById('statBitrate').textContent = `${bitrate} kbps`;
+                    }
+                }
+                
+                lastBytesReceived = currentBytesReceived;
+                lastTimestamp = now;
+
+                if (width > 0 && height > 0) {
+                    document.getElementById('statResolution').textContent = `${width}x${height}`;
+                }
+            }, 1000);
+        }
+
+        function stopStatsMonitor() {
+            if (statsInterval) {
+                clearInterval(statsInterval);
+                statsInterval = null;
+            }
+            lastBytesReceived = 0;
+            lastTimestamp = Date.now();
+        }
+
+        // ✅ ADDED: Debug video element state
+        function debugVideoState() {
+            log('🔍 Video Debug:', 'info');
+            log(`  - readyState: ${video.readyState}`, 'info');
+            log(`  - paused: ${video.paused}`, 'info');
+            log(`  - muted: ${video.muted}`, 'info');
+            log(`  - srcObject: ${video.srcObject ? 'SET' : 'NULL'}`, 'info');
+            if (video.srcObject) {
+                const tracks = video.srcObject.getTracks();
+                log(`  - tracks: ${tracks.length} (${tracks.map(t => t.kind).join(', ')})`, 'info');
+                tracks.forEach(track => {
+                    log(`    • ${track.kind}: ${track.enabled ? 'enabled' : 'disabled'}, readyState=${track.readyState}`, 'info');
+                });
+            }
+        }
+        
+        // Start
+        connectWebSocket();
+    </script>
+</body>
+</html>
