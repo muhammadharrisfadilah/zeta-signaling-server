@@ -1,0 +1,12 @@
+{
+  "name": "zeta-signaling-server",
+  "version": "2.0.0",
+  "description": "WebRTC Signaling Server for Android Streaming",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
