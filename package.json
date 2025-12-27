@@ -1,12 +1,24 @@
 {
-  "name": "zeta-signaling-server",
-  "version": "2.0.0",
-  "description": "WebRTC Signaling Server for Android Streaming",
+  "name": "zeta-cloud-signaling",
+  "version": "3.0.0",
+  "description": "WebRTC Signaling Server for Remote Streaming",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
+    "express": "^4.18.2",
     "ws": "^8.16.0"
-  }
+  },
+  "keywords": [
+    "webrtc",
+    "signaling",
+    "websocket",
+    "streaming"
+  ],
+  "author": "Zeta Streaming",
+  "license": "MIT"
 }
