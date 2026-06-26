@@ -3,7 +3,7 @@ const WebSocket = require('ws');
 const http = require('http');
 const path = require('path');
 
-// ✅ Auto-detect port from environment (Render uses PORT env var)
+// ✅ Diubah ke port 7860 agar sesuai dengan standar Hugging Face Spaces
 const PORT = process.env.PORT || 7860;
 
 // Express app
@@ -40,7 +40,7 @@ let browserClients = new Map();
 const PING_INTERVAL = 30000;
 const CLIENT_TIMEOUT = 90000;
 
-console.log('🚀 Zeta Signaling Server (Render Edition)');
+console.log('🚀 Zeta Signaling Server (Hugging Face Edition)');
 console.log('━'.repeat(50));
 
 // Keepalive
@@ -245,10 +245,10 @@ function cleanupBrowserClient(clientId) {
     console.log(`❌ Browser disconnected: ${clientId}`);
 }
 
-// Start server
-server.listen(PORT, () => {
+// ✅ Menambahkan alamat "0.0.0.0" agar server dapat diakses dari jaringan luar Hugging Face
+server.listen(PORT, "0.0.0.0", () => {
     console.log(`\n💡 Server running on port ${PORT}`);
-    console.log(`🌐 WebSocket endpoint: wss://[your-app].onrender.com/ws`);
+    console.log(`🌐 WebSocket endpoint: wss://harris0309-spy.hf.space/ws`);
     console.log('⏳ Waiting for connections...\n');
 });
 
