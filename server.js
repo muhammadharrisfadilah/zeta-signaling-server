@@ -4,7 +4,7 @@ const http = require('http');
 const path = require('path');
 
 // ✅ Auto-detect port from environment (Render uses PORT env var)
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 7860;
 
 // Express app
 const app = express();
